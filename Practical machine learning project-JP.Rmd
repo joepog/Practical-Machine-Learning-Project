@@ -1,0 +1,164 @@
+---
+title: "Practical Machine Learning - Joe Pogson"
+author: "Joe Pogson"
+date: "4/21/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Overview
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. 
+
+These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. 
+
+One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. 
+
+More information is available from the website here: http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/har
+
+## Library and Data loading.
+
+```{r messages=false}
+library(caret)
+library(rattle)
+library(e1071)
+library(randomForest)
+library(gbm)
+library(survival)
+library(splines)
+library(parallel)
+library(plyr)
+```
+
+
+```{r Training}
+TrainData <- read.csv(url("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"),header=TRUE)
+dim(TrainData)
+```
+```{r TestData}
+TestData <-read.csv(url("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"),header=TRUE)
+dim(TestData)
+```
+
+```{r}
+str(TrainData)
+```
+
+Here we can see that the data is made up of 160 parameters from 19622 observations. We can remove some of these parameters as they are mainly NAs or are purely personal information not relevant for this model.
+
+## Cleaning Data
+
+```{r}
+removeCol <- which(colSums(is.na(TrainData)|TrainData=="")>0.9*dim(TrainData)[1])
+CleanTrainData <- TrainData[,-removeCol] 
+CleanTrainData <- CleanTrainData[,-(1:5)]
+dim(CleanTrainData)
+```
+
+Repeat for the Test Data.
+```{r}
+removeCol <- which(colSums(is.na(TestData)|TestData=="")>0.9*dim(TestData)[1])
+CleanTestData <- TestData[,-removeCol] 
+CleanTestData <- CleanTestData[,-(1:5)]
+dim(CleanTestData)
+```
+
+We have now reduced the number of parameters to 55.
+
+## Training 
+
+In order to limit overfitting cross-validation will be used on a partitioned data set using 5-folds.
+
+```{R}
+set.seed(12345)
+inTrain1 <- createDataPartition(CleanTrainData$classe, p=0.75, list=FALSE)
+Train1 <- CleanTrainData[inTrain1,]
+Test1 <- CleanTrainData[-inTrain1,]
+dim(Train1)
+```
+```{r}
+dim(Test1)
+```
+
+### Classification tree
+
+First we will test the data using a classification tree,
+
+```{r}
+trControl <- trainControl(method="cv", number=5)
+model_CT <- train(classe~., data=Train1, method="rpart", trControl=trControl)
+```
+```{r}
+fancyRpartPlot(model_CT$finalModel)
+```
+
+SHow  the confusion matrix and accuracy of this model.
+```{r}
+PredTrain <- predict(model_CT,newdata = Test1)
+ConfMtxCT <- confusionMatrix(Test1$class,PredTrain)
+ConfMtxCT$table
+```
+```{r}
+ConfMtxCT$overall[1]
+```
+
+Here we can see that the accuracy for this Model is 49% not a bad start. 
+
+### Random forests
+
+Lets try again but with random forests this time.
+
+```{r messages=FALSE}
+controlRF <- trainControl(method="cv", number=3, verboseIter=FALSE)
+RandFor <- train(classe ~ ., data=Train1, method="rf",
+                          trControl=controlRF)
+RandFor$finalModel
+```
+```{r}
+plot(RandFor,main="Accuracy vs number of predictors")
+```
+
+```{r}
+trainpred <-predict(RandFor,newdata=Test1)
+RFConfMTX <- confusionMatrix(Test1$classe,trainpred)
+```
+```{r}
+RFConfMTX$overall[1]
+```
+With random forest we have increased our accuracy to almost 100% WOW.
+
+### Generalised Boosted Model
+
+
+Just to see if we can possibly improve on the random forest method we will use the generalised boosted model.
+
+```{r}
+model_GBM <- train(classe~., data=Train1, method="gbm", trControl=trControl, verbose=FALSE)
+```
+```{r}
+plot(model_GBM)
+```
+```{r}
+trainpred <- predict(model_GBM,newdata=Test1)
+
+confMatGBM <- confusionMatrix(Test1$classe,trainpred)
+confMatGBM$table
+```
+```{r}
+confMatGBM$overall[1]
+```
+
+With 5 folds the precision is 98.6%. Just a bit less than the Random Forest.
+
+## Conculsion
+
+With an accuracy of 99.9% random forest is the best method to use.
+
+```{r}
+FinalTestPred <- predict(RandFor,newdata=CleanTestData)
+FinalTestPred
+```
+
